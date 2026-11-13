@@ -67,10 +67,11 @@ The People tab lists everyone across the loaded events, with what they're doing 
 
 ## Install
 
-1. Download the latest `vms-plus-<version>.zip` from [Releases](../../releases) and unzip it.
-2. Open `chrome://extensions` and turn on **Developer mode** (top right).
-3. Click **Load unpacked** and choose the unzipped folder.
-4. Open any page on `my.firstinspires.org/VMS` and click the **VMS+** button.
+1. Download the latest `vms-plus-<version>.zip` from [Releases](../../releases)
+2. Unzip the download.
+3. Open `chrome://extensions` and turn on **Developer mode** (top right).
+4. Click **Load unpacked** and choose the unzipped folder.
+5. Open any page on `my.firstinspires.org/VMS` and click the **VMS+** button.
 
 To update, replace the folder's files with the new version and click the reload icon on the VMS+ card in `chrome://extensions`.
 
