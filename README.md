@@ -32,6 +32,7 @@ The Roles tab shows each role's assigned / target count for every event. Short r
 - **Add a custom role** to several events at once.
 - **Stop or reopen applications** for a role.
 - **Copy invite links.** One click copies a role's or event's Express Volunteer link, or its QR code as an image, ready to paste into an email or a flyer.
+- **Headcount for food and shirts.** For food: how many different people are on site each day (including setup days), against that day's goal. Someone in two roles, or at two events on the same day, counts once. For shirts: how many different people are assigned across the events you tick, with their shirt sizes from their VMS profiles.
 
 ### Know your volunteers
 

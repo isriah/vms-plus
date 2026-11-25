@@ -870,6 +870,17 @@
       .prow .pflags { grid-column: 1; grid-row: 2; }
     }
     .pname { font-weight: 600; cursor: pointer; }
+    details.hc > summary { font-weight: 600; margin: 0; }
+    details.hc[open] > summary { margin-bottom: 8px; }
+    .hcgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px 28px; align-items: start; }
+    .hcgrid h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+    table.hct { width: auto; background: none; }
+    table.hct th, table.hct td { position: static; border: none; border-bottom: 1px solid var(--line); padding: 3px 12px 3px 0; }
+    table.hct td.num { text-align: right; }
+    table.hct td:first-child { white-space: nowrap; }
+    .hcevs { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+    .hcbig { margin: 4px 0 6px; } .hcbig .num { font-size: 22px; }
+    .hcnote { margin-top: 6px; max-width: 520px; }
     .lnk.pname { font-size: inherit; margin: 0; text-align: left; }
     input.findq { flex: 1 1 320px; max-width: 560px; }
     .findstat { margin-bottom: 8px; }
@@ -1272,7 +1283,7 @@
     events: [], selected: new Set(), loaded: [], people: [],
     tab: ['staff', 'roles', 'people', 'find', 'times', 'notify', 'message'].includes(saved.tab) ? saved.tab : 'staff', busy: false,
     staffRole: saved.staffRole || '', staged: [], showAssigned: saved.showAssigned, poolSearch: '', staffConfirm: false, staffApplying: false, staffResult: null,
-    detail: null,
+    detail: null, hcOpen: false, hcOff: new Set(),
     toggleKey: '', toggling: false, inviteLink: null, hideAsk: null, hiding: false,
     newRole: { open: false, name: '', desc: '', target: '1', allow: true, evs: null, confirming: false, saving: false, error: '', result: null },
     msg: { evs: null, aud: '0', allRoles: true, roles: new Set(), subject: '', message: '', bcc: false, confirming: false, sending: false, error: '', result: null },
@@ -1728,6 +1739,7 @@
         h('strong', {}, state.inviteLink.label), state.inviteLink.error ? ': ' + state.inviteLink.error : (state.inviteLink.copied ? ' (copied)' : ' (copy it from here)'),
         state.inviteLink.url ? h('div', { class: 'linkbox' }, state.inviteLink.url) : null,
         h('button', { class: 'lnk', onclick: () => { state.inviteLink = null; renderMain(); } }, 'Dismiss')) : null,
+      headcountCard(),
       h('table', {},
         h('thead', {}, h('tr', {}, h('th', {}, 'Role'),
           loaded.map(({ ev }, i) => h('th', {}, evLabel(ev),
@@ -1738,6 +1750,101 @@
               h('button', { class: 'lnk', title: allDays(i) ? 'One link for every day of this event' : '', onclick: (e) => copyInvite(ev, null, e.currentTarget) }, 'Event invite link'),
               h('button', { class: 'lnk', title: 'Copy the QR code image and open VMS\'s QR code page', onclick: (e) => copyQr(ev, e.currentTarget) }, 'QR code')))))),
         h('tbody', {}, body)));
+  }
+
+  // ----- Headcount (Roles tab): people on site each day, for food; different people across events, for shirts -----
+
+  // Each calendar day across the loaded events: who is assigned that day (once each, whatever their roles or events),
+  // and the day's goal, which is the role targets of the events running that day added up.
+  function dailyHeadcount() {
+    const days = new Map();
+    const dayAt = (d) => {
+      const key = d.getTime();
+      if (!days.has(key)) days.set(key, { d, people: new Set(), goal: 0, events: [], setups: [] });
+      return days.get(key);
+    };
+    [...new Set(state.loaded.map((l) => l.src))].forEach((raw) => {
+      const ev = raw.ev, w = raw.sched, first = dateOf(ev.date);
+      if (!first && !w) return;
+      const base = w ? w.start : first;
+      const last = w ? dayGap(w.start, w.end) : 0;
+      const lead = w && first ? Math.max(0, Math.min(dayGap(w.start, first), last + 1)) : 0;
+      const at = (pos) => new Date(base.getFullYear(), base.getMonth(), base.getDate() + pos);
+      const eventDays = [];
+      for (let i = 0; i < Math.max(1, ev.days || 1); i++) eventDays.push(lead + i);
+      const goal = raw.roles.reduce((t, r) => t + (!r.admin && !r.inactive && r.counts ? Math.max(0, r.counts.target || 0) : 0), 0);
+      eventDays.forEach((pos) => { const x = dayAt(at(pos)); x.goal += goal; x.events.push(ev.name); });
+      raw.roles.forEach((r) => (Array.isArray(r.assigned) ? r.assigned : []).forEach((v) => {
+        const shifts = w ? v.Assignments || [] : [];
+        // Someone in a role with no shift set yet counts on every day of the event.
+        if (!shifts.length) { eventDays.forEach((pos) => dayAt(at(pos)).people.add(v.PeopleID)); return; }
+        shifts.forEach((a) => {
+          for (let pos = a.StartingPosition; pos < a.StartingPosition + (a.PositionsSpanned || 1); pos++) {
+            const x = dayAt(at(pos));
+            x.people.add(v.PeopleID);
+            if (pos < lead && !x.setups.includes(ev.name)) x.setups.push(ev.name);
+          }
+        });
+      }));
+    });
+    return [...days.values()].filter((x) => x.people.size || x.goal).sort((a, b) => a.d - b.d);
+  }
+
+  // Shirt sizes in their usual order, whatever words VMS puts around them ("Adult M", "Youth L"…).
+  const SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
+  const sizeRank = (s) => {
+    const t = s.toUpperCase().replace(/\bXXL\b/, '2XL').replace(/\bXXXL\b/, '3XL').replace(/\bSMALL\b/, 'S').replace(/\bMEDIUM\b/, 'M').replace(/\bLARGE\b/, 'L');
+    const youth = /YOUTH|CHILD|KID/.test(t) ? 0 : 100;
+    const hit = SIZE_ORDER.map((x, i) => [x, i]).reverse().find(([x]) => new RegExp('(^|[^A-Z0-9])' + x + '([^A-Z0-9]|$)').test(t));
+    return hit ? youth + hit[1] : 1000;
+  };
+
+  function headcountCard() {
+    const daily = dailyHeadcount();
+    const raws = [...new Set(state.loaded.map((l) => l.src))];
+    const chosen = raws.filter((raw) => !state.hcOff.has(raw.ev.id));
+    const ids = new Set();
+    chosen.forEach((raw) => raw.roles.forEach((r) => (Array.isArray(r.assigned) ? r.assigned : []).forEach((v) => ids.add(v.PeopleID))));
+    const sizes = new Map();
+    let unread = 0, none = 0;
+    ids.forEach((id) => {
+      const pr = profiles.get(id);
+      if (!pr) { unread++; return; }
+      const s = (pr.shirt || '').trim();
+      if (!s) { none++; return; }
+      sizes.set(s, (sizes.get(s) || 0) + 1);
+    });
+    const sizeList = [...sizes].sort((a, b) => sizeRank(a[0]) - sizeRank(b[0]) || a[0].localeCompare(b[0]));
+    const md = (d) => WEEKDAYS[d.getDay()] + ' ' + (d.getMonth() + 1) + '/' + d.getDate();
+
+    return h('details', { class: 'card hc', open: state.hcOpen, ontoggle: (e) => { state.hcOpen = e.target.open; } },
+      h('summary', {}, 'Headcount for food and shirts'),
+      h('div', { class: 'hcgrid' },
+        h('section', {},
+          h('h3', {}, 'Food: people on site each day'),
+          daily.length ? h('table', { class: 'hct' },
+            h('thead', {}, h('tr', {}, h('th', {}, 'Day'), h('th', {}, 'People'), h('th', {}, 'Goal'), h('th', {}, 'Events'))),
+            h('tbody', {}, daily.map((x) => h('tr', {},
+              h('td', {}, md(x.d), !x.events.length ? h('span', { class: 'sub' }, ' setup') : null),
+              h('td', { class: 'num' + (x.goal && x.people.size < x.goal ? ' lo' : x.goal ? ' hi' : '') }, String(x.people.size)),
+              h('td', { class: 'num' }, x.goal ? String(x.goal) : '—'),
+              h('td', { class: 'sub' }, [...x.events, ...x.setups.map((n) => 'Setup: ' + n)].join(' · '))))))
+            : h('div', { class: 'sub' }, 'No event dates to count by.'),
+          h('div', { class: 'sub hcnote' }, 'Everyone assigned counts once a day, even in two roles or at two events. Anyone in a role with no shift set yet counts on every day of that event. '
+            + 'Goal is the event’s role targets added up, so someone filling two roles counts once here but fills two targets.')),
+        h('section', {},
+          h('h3', {}, 'Shirts: different people across events'),
+          raws.length > 1 ? h('div', { class: 'hcevs' }, raws.map((raw) => h('label', {},
+            h('input', { type: 'checkbox', checked: !state.hcOff.has(raw.ev.id),
+              onchange: (e) => { e.target.checked ? state.hcOff.delete(raw.ev.id) : state.hcOff.add(raw.ev.id); renderMain(); } }),
+            ' ' + evLabel(raw.ev)))) : null,
+          h('div', { class: 'hcbig' }, h('span', { class: 'num' }, String(ids.size)), ids.size === 1 ? ' person' : ' people',
+            h('span', { class: 'sub' }, ' assigned to ' + (chosen.length === raws.length ? (raws.length > 1 ? 'any of these events' : 'this event') : plural(chosen.length, 'chosen event')) + ', each counted once')),
+          sizeList.length ? h('div', {}, sizeList.map(([s, n]) => chip('plain', s + ': ' + n))) : null,
+          unread || none ? h('div', { class: 'sub' },
+            [unread ? h('span', {}, h('span', { class: 'spin', 'aria-hidden': 'true' }), 'Sizes still loading for ' + unread + (unread === 1 ? ' person' : ' people')) : null,
+              unread && none ? ' · ' : null, none ? none + ' gave no size' : null]) : null,
+          h('div', { class: 'sub hcnote' }, 'Shirt sizes come from each person’s VMS profile, read in the background after loading.'))));
   }
 
   // ----- Add a custom role (Roles tab) -----
@@ -2688,6 +2795,9 @@
           const before = consentOf(next);
           try { await readProfile(next); } catch (e) { if (Date.now() < blockedUntil) throw e; profileFailed.add(next.id); }
           if (consentOf(next) !== before) profilesChanged = true;
+          // The headcount's shirt sizes fill in as profiles arrive, while it's open.
+          if (state.tab === 'roles' && state.hcOpen && !state.targetEdit && (unread.length === 1 || unread.length % 10 === 0)
+            && !(shadow.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(shadow.activeElement.tagName))) renderMain();
           // Redraw now and then so corrected consent flags show, but not while someone is typing.
           if (profilesChanged && (unread.length === 1 || ++profilesSince >= 15)) {
             profilesSince = 0;
